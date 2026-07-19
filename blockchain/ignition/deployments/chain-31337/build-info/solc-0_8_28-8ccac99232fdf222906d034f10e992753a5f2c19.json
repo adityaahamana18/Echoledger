@@ -1,0 +1,49 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-8ccac99232fdf222906d034f10e992753a5f2c19",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "compilerType": "solc",
+  "toolVersions": {
+    "hardhat": "3.10.0"
+  },
+  "userSourceNameMap": {
+    "contracts/SimpleDispute.sol": "project/contracts/SimpleDispute.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/SimpleDispute.sol": {
+        "content": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.28;\n\n/// @notice Commits decision hashes and records economically meaningful human challenges.\ncontract SimpleDispute {\n  uint256 public immutable minimumStake;\n  address public owner;\n  address public automatedChallenger;\n\n  struct Decision { bytes32 hash; uint64 committedAt; address committedBy; }\n  struct Challenge { address challenger; uint128 stake; uint64 createdAt; string reason; bool automated; }\n  mapping(bytes32 => Decision) private decisions;\n  mapping(bytes32 => Challenge[]) private challenges;\n\n  event DecisionCommitted(bytes32 indexed decisionId, bytes32 indexed decisionHash, address indexed committedBy);\n  event DecisionChallenged(bytes32 indexed decisionId, address indexed challenger, uint256 stake, bool automated, string reason);\n\n  constructor(uint256 stake) { owner = msg.sender; minimumStake = stake; }\n  modifier onlyOwner() { require(msg.sender == owner, \"Owner only\"); _; }\n\n  function setAutomatedChallenger(address challenger) external onlyOwner { automatedChallenger = challenger; }\n  function commitDecision(bytes32 decisionId, bytes32 decisionHash) external {\n    require(decisionHash != bytes32(0), \"Hash required\");\n    require(decisions[decisionId].committedAt == 0, \"Decision already committed\");\n    decisions[decisionId] = Decision(decisionHash, uint64(block.timestamp), msg.sender);\n    emit DecisionCommitted(decisionId, decisionHash, msg.sender);\n  }\n  function challengeDecision(bytes32 decisionId, string calldata reason) external payable {\n    require(decisions[decisionId].committedAt != 0, \"Unknown decision\");\n    require(msg.value >= minimumStake, \"Insufficient stake\");\n    _challenge(decisionId, reason, msg.sender, uint128(msg.value), false);\n  }\n  function automatedChallenge(bytes32 decisionId, string calldata reason) external {\n    require(msg.sender == automatedChallenger, \"Automation only\");\n    require(decisions[decisionId].committedAt != 0, \"Unknown decision\");\n    _challenge(decisionId, reason, msg.sender, 0, true);\n  }\n  function _challenge(bytes32 decisionId, string memory reason, address challenger, uint128 stake, bool automated) private {\n    require(bytes(reason).length >= 20, \"Reason too short\");\n    challenges[decisionId].push(Challenge(challenger, stake, uint64(block.timestamp), reason, automated));\n    emit DecisionChallenged(decisionId, challenger, stake, automated, reason);\n  }\n  function verifyDecision(bytes32 decisionId) external view returns (bytes32 hash, uint64 committedAt, address committedBy) {\n    Decision memory decision = decisions[decisionId]; return (decision.hash, decision.committedAt, decision.committedBy);\n  }\n  function challengeCount(bytes32 decisionId) external view returns (uint256) { return challenges[decisionId].length; }\n}\n"
+      }
+    }
+  }
+}
