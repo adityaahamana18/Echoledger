@@ -6,6 +6,98 @@ import Timeline from "../components/Timeline";
 import Button from "../components/Button";
 import { getAudit, getAudits } from "../utils/audit";
 import { useEffect, useState } from "react";
-export default function Trace() { const [audit, setAudit] = useState(null); const [message, setMessage] = useState(""); const { id } = useParams(); const navigate = useNavigate(); useEffect(() => { if (id) { getAudit(id).then(setAudit).catch(() => setAudit(false)); return; } getAudits().then((audits) => { const latest = audits.find((item) => item.status === "complete"); if (latest) navigate(`/trace/${latest.id}`, { replace: true }); else setMessage("No completed decision exists yet. Create an application first."); }).catch(() => setAudit(false)); }, [id, navigate]); if (message) return <Page><section className="mx-auto max-w-3xl px-6 py-20"><p className="text-slate-300">{message}</p><Link to="/loan" className="btn-primary mt-5">Create a decision</Link></section></Page>; if (audit === false) return <Page><p className="mx-auto max-w-3xl px-6 py-20 text-rose-300">Decision record not found. Please sign in and check Firestore permissions.</p></Page>; if (!audit) return <Page><p className="mx-auto max-w-3xl px-6 py-20 text-slate-400">Loading audit trail…</p></Page>; const { application, result } = audit; const steps = result.trace?.length ? result.trace : [
-  { title: "Application received", detail: `${application.name}'s request was secured and normalized.` }, { title: "Income signal verified", detail: `Reported monthly income: ₹${Number(application.income).toLocaleString("en-IN")}.` }, { title: "Credit profile checked", detail: `Credit score ${application.creditScore} evaluated against policy thresholds.` }, { title: "Risk calculated", detail: `${result.risk} risk classification assigned from affordability and credit signals.` }, { title: "Decision generated", detail: `${result.decision} with ${result.confidence}% model confidence.` }];
-  return <Page><section className="mx-auto max-w-3xl px-6 py-14"><span className="eyebrow"><ShieldCheck size={14} /> Auditable by design</span><h1 className="mt-4 text-4xl font-bold">Decision <span className="gradient-text">trace</span></h1><p className="mt-3 text-slate-400">A human-readable record of the checks behind {audit.id}.</p><GlassCard className="mt-9"><Timeline steps={steps} /><div className="border-t border-white/10 pt-5"><p className="text-xs text-slate-500">Evidence fingerprint</p><code className="mt-2 block break-all text-xs text-cyan-300">{audit.hash}</code></div></GlassCard><div className="mt-7 flex gap-3"><Link to={`/decision/${id}`}><Button>Back to decision</Button></Link><Link className="secondary-btn" to={`/challenge/${id}`}><FileCheck2 size={17} /> Submit a challenge</Link></div></section></Page>; }
+
+export default function Trace() {
+  const [audit, setAudit] = useState(null);
+  const [message, setMessage] = useState("");
+  const { id } = useParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (id) {
+      getAudit(id).then(setAudit).catch(() => setAudit(false));
+      return;
+    }
+    getAudits().then((audits) => {
+      const latest = audits.find((item) => item.status === "complete");
+      if (latest) navigate(`/trace/${latest.id}`, { replace: true });
+      else setMessage("No completed decision exists yet. Create an application first.");
+    }).catch(() => setAudit(false));
+  }, [id, navigate]);
+
+  if (message) return (
+    <Page>
+      <section className="mx-auto max-w-3xl px-6 py-20">
+        <p className="text-slate-300">{message}</p>
+        <Link to="/loan" className="btn-primary mt-5">Create a decision</Link>
+      </section>
+    </Page>
+  );
+
+  if (audit === false) return (
+    <Page>
+      <p className="mx-auto max-w-3xl px-6 py-20 text-rose-300">Decision record not found. Please sign in and check Firestore permissions.</p>
+    </Page>
+  );
+
+  if (!audit) return (
+    <Page>
+      <p className="mx-auto max-w-3xl px-6 py-20 text-slate-400">Loading audit trail…</p>
+    </Page>
+  );
+
+  const { application, result } = audit;
+  const steps = result.trace?.length ? result.trace : [
+    { title: "Application received", detail: `${application.name}'s request was secured and normalized.` },
+    { title: "Income signal verified", detail: `Reported monthly income: ₹${Number(application.income).toLocaleString("en-IN")}.` },
+    { title: "Credit profile checked", detail: `Credit score ${application.creditScore} evaluated against policy thresholds.` },
+    { title: "Risk calculated", detail: `${result.risk} risk classification assigned from affordability and credit signals.` },
+    { title: "Decision generated", detail: `${result.decision} with ${result.confidence}% model confidence.` },
+  ];
+
+  return (
+    <Page>
+      <section className="mx-auto max-w-3xl px-6 py-14">
+        <span className="eyebrow"><ShieldCheck size={14} /> Auditable by design</span>
+        <h1 className="mt-4 text-4xl font-bold">Decision <span className="gradient-text">trace</span></h1>
+        <p className="mt-3 text-slate-400">A human-readable record of the checks behind {audit.id}.</p>
+
+        <GlassCard className="mt-9">
+          <Timeline steps={steps} />
+
+          <div className="mt-6 border-t border-white/10 pt-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Applicant details</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-xs text-slate-500">Name</p>
+                <p className="text-sm font-medium text-white">{application.name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Email</p>
+                <p className="text-sm font-medium text-white">{application.email || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Phone</p>
+                <p className="text-sm font-medium text-white">{application.phone || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Date of birth</p>
+                <p className="text-sm font-medium text-white">{application.dob || "—"}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-white/10 pt-5">
+            <p className="text-xs text-slate-500">Evidence fingerprint</p>
+            <code className="mt-2 block break-all text-xs text-cyan-300">{audit.hash}</code>
+          </div>
+        </GlassCard>
+
+        <div className="mt-7 flex gap-3">
+          <Link to={`/decision/${id}`}><Button>Back to decision</Button></Link>
+          <Link className="secondary-btn" to={`/challenge/${id}`}><FileCheck2 size={17} /> Submit a challenge</Link>
+        </div>
+      </section>
+    </Page>
+  );
+}

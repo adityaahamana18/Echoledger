@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Activity, CheckCircle2, Cpu, ShieldCheck } from "lucide-react";
+import { Activity, CheckCircle2, Cpu, ShieldCheck, ArrowRight } from "lucide-react";
 import Page from "../components/Page";
 import GlassCard from "../components/GlassCard";
 import Button from "../components/Button";
@@ -9,12 +9,196 @@ import { auth } from "../firebase";
 import { commitDecision, isBlockchainConfigured } from "../blockchain/simpleDispute";
 import { getAudit, saveBlockchainCommit, saveDecision } from "../utils/audit";
 
-const fallback = (application) => { const ratio = Number(application.loanAmount) / Math.max(Number(application.income) * 12, 1); const approved = Number(application.creditScore) >= 650 && ratio <= 5; const result = { decision: approved ? "Approved" : "Review required", confidence: Math.max(58, Math.min(96, Math.round(Number(application.creditScore) / 10 - ratio * 2))), risk: approved ? "Low" : "High", reason: "The policy inputs were evaluated using affordability and credit thresholds.", suggestion: "Provide additional evidence if you want a human reassessment." }; return { ...result, reasoningSteps: [{ title: "Application normalized", detail: "Required policy inputs validated; name and age excluded." }, { title: "Income affordability assessed", detail: `Annualized income: ₹${(Number(application.income) * 12).toLocaleString("en-IN")}.` }, { title: "Credit signal assessed", detail: `Credit score ${application.creditScore} evaluated.` }, { title: "Exposure ratio calculated", detail: `Loan-to-income ratio: ${ratio.toFixed(2)}×.` }], agentReview: { disagrees: !approved, verdict: !approved ? "Challenge recommended" : "No material disagreement", reason: !approved ? "Independent reviewer requests human review." : "Independent reviewer agrees." } }; };
+const fallback = (application) => {
+  const ratio = Number(application.loanAmount) / Math.max(Number(application.income) * 12, 1);
+  const approved = Number(application.creditScore) >= 650 && ratio <= 5;
+  const result = {
+    decision: approved ? "Approved" : "Review required",
+    confidence: Math.max(58, Math.min(96, Math.round(Number(application.creditScore) / 10 - ratio * 2))),
+    risk: approved ? "Low" : "High",
+    reason: "The policy inputs were evaluated using affordability and credit thresholds.",
+    suggestion: "Provide additional evidence if you want a human reassessment."
+  };
+  return {
+    ...result,
+    reasoningSteps: [
+      { title: "Application normalized", detail: "Required policy inputs validated; name and age excluded." },
+      { title: "Income affordability assessed", detail: `Annualized income: ₹${(Number(application.income) * 12).toLocaleString("en-IN")}.` },
+      { title: "Credit signal assessed", detail: `Credit score ${application.creditScore} evaluated.` },
+      { title: "Exposure ratio calculated", detail: `Loan-to-income ratio: ${ratio.toFixed(2)}×.` }
+    ],
+    agentReview: {
+      disagrees: !approved,
+      verdict: !approved ? "Challenge recommended" : "No material disagreement",
+      reason: !approved ? "Independent reviewer requests human review." : "Independent reviewer agrees."
+    }
+  };
+};
 
 export default function Processing() {
-  const [active, setActive] = useState(0); const [error, setError] = useState(""); const [audit, setAudit] = useState(null); const [committing, setCommitting] = useState(false); const navigate = useNavigate(); const { id } = useParams();
-  useEffect(() => { let alive = true; const run = async () => { try { const current = await getAudit(id); let result; try { const token = await auth.currentUser?.getIdToken(); const { data } = await api.post("/loan", current.application, { headers: { Authorization: `Bearer ${token}` } }); result = data; } catch { result = fallback(current.application); } const steps = [...(result.reasoningSteps || []), { title: "Decision receipt hashed", detail: "The application, outcome, and reasoning steps are bound into one SHA-256 fingerprint." }]; for (let index = 0; index < steps.length; index += 1) { if (!alive) return; setActive(index); await new Promise((resolve) => window.setTimeout(resolve, 700)); } const saved = await saveDecision(id, current.application, { ...result, trace: result.trace || steps }, steps); if (alive) setAudit(saved); } catch { if (alive) setError("We could not build this decision record. Please return to your dashboard."); } }; run(); return () => { alive = false; }; }, [id]);
-  const commit = async () => { setCommitting(true); setError(""); try { const receipt = await commitDecision(id, audit.hash); await saveBlockchainCommit(id, receipt.transactionHash); if (audit.result.agentReview?.disagrees) { try { const token = await auth.currentUser?.getIdToken(); await api.post("/automated-challenge", { id, hash: audit.hash, reason: audit.result.agentReview.reason }, { headers: { Authorization: `Bearer ${token}` } }); } catch (automationError) { console.warn("Automated challenge was not submitted", automationError); } } navigate(`/decision/${id}`, { replace: true }); } catch (commitError) { setError(commitError.response?.data?.error || commitError.shortMessage || commitError.message || "Blockchain commitment failed."); } finally { setCommitting(false); } };
+  const [active, setActive] = useState(0);
+  const [error, setError] = useState("");
+  const [audit, setAudit] = useState(null);
+  const [committing, setCommitting] = useState(false);
+  const navigate = useNavigate();
+  const { id } = useParams();
+
+  // Process the decision
+  useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      try {
+        const current = await getAudit(id);
+        let result;
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          const { data } = await api.post("/loan", current.application, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          result = data;
+        } catch {
+          result = fallback(current.application);
+        }
+        const steps = [
+          ...(result.reasoningSteps || []),
+          { title: "Decision receipt hashed", detail: "The application, outcome, and reasoning steps are bound into one SHA-256 fingerprint." },
+        ];
+        for (let index = 0; index < steps.length; index += 1) {
+          if (!alive) return;
+          setActive(index);
+          await new Promise((resolve) => window.setTimeout(resolve, 700));
+        }
+        const saved = await saveDecision(id, current.application, { ...result, trace: result.trace || steps }, steps);
+        if (alive) setAudit(saved);
+      } catch {
+        if (alive) setError("We could not build this decision record. Please return to your dashboard.");
+      }
+    };
+    run();
+    return () => { alive = false; };
+  }, [id]);
+
+  // Auto-navigate to decision page after a short delay when processing is complete
+  useEffect(() => {
+    if (audit && !isBlockchainConfigured()) {
+      const timer = setTimeout(() => {
+        navigate(`/decision/${id}`, { replace: true });
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [audit, id, navigate]);
+
+  const commit = async () => {
+    setCommitting(true);
+    setError("");
+    try {
+      const receipt = await commitDecision(id, audit.hash);
+      await saveBlockchainCommit(id, receipt.transactionHash);
+      if (audit.result.agentReview?.disagrees) {
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          await api.post("/automated-challenge", { id, hash: audit.hash, reason: audit.result.agentReview.reason }, { headers: { Authorization: `Bearer ${token}` } });
+        } catch (automationError) {
+          console.warn("Automated challenge was not submitted", automationError);
+        }
+      }
+      navigate(`/decision/${id}`, { replace: true });
+    } catch (commitError) {
+      setError(commitError.response?.data?.error || commitError.shortMessage || commitError.message || "Blockchain commitment failed.");
+      // Even if commit fails, let user go to decision page
+      setAudit({ ...audit, commitFailed: true });
+    } finally {
+      setCommitting(false);
+    }
+  };
+
   const steps = audit?.reasoningSteps || [];
-  return <Page><section className="mx-auto flex min-h-[68vh] max-w-2xl items-center px-6 py-16"><GlassCard className="w-full text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-500/10 text-blue-400"><Cpu size={36} className={!audit ? "animate-pulse" : ""} /></div><p className="mt-6 text-sm font-semibold uppercase tracking-[.2em] text-blue-400">Evidence-led processing</p><h1 className="mt-3 text-3xl font-bold">Building your decision receipt</h1><p className="mt-3 text-slate-400">Each completed step becomes part of the hashed audit record.</p><div className="mt-9 space-y-3 text-left">{(steps.length ? steps : [{ title: "Preparing verified reasoning", detail: "Connecting to the decision engine." }]).map((step, index) => <div key={step.title} className={`rounded-xl px-4 py-3 ${index <= active || audit ? "bg-blue-500/10 text-white" : "text-slate-600"}`}><div className="flex items-center gap-3 text-sm">{index < active || audit ? <CheckCircle2 size={18} className="text-emerald-300" /> : <Activity size={18} className="animate-pulse" />}{step.title}</div><p className="ml-7 mt-1 text-xs text-slate-400">{step.detail}</p></div>)}</div>{audit && <div className="mt-7 rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-4 text-left"><div className="flex gap-3"><ShieldCheck className="shrink-0 text-cyan-300" size={19} /><div><p className="font-medium">SHA-256 receipt ready</p><code className="mt-2 block break-all text-xs text-cyan-200">{audit.hash}</code></div></div>{isBlockchainConfigured() ? <Button className="mt-4 w-full" onClick={commit} disabled={committing}>{committing ? "Waiting for wallet confirmation…" : "Commit decision on-chain"}</Button> : <><p className="mt-4 text-xs text-amber-200">Set VITE_SIMPLE_DISPUTE_ADDRESS to enable a real wallet commitment.</p><button className="secondary-btn mt-3 w-full" onClick={() => navigate(`/decision/${id}`, { replace: true })}>View unanchored decision</button></>}</div>}{error && <p className="mt-4 text-sm text-rose-400">{error}</p>}</GlassCard></section></Page>;
+
+  return (
+    <Page>
+      <section className="mx-auto flex min-h-[68vh] max-w-2xl items-center px-6 py-16">
+        <GlassCard className="w-full text-center">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-500/10 text-blue-400">
+            <Cpu size={36} className={!audit ? "animate-pulse" : ""} />
+          </div>
+          <p className="mt-6 text-sm font-semibold uppercase tracking-[.2em] text-blue-400">
+            Evidence-led processing
+          </p>
+          <h1 className="mt-3 text-3xl font-bold">
+            {audit ? "Decision ready" : "Building your decision receipt"}
+          </h1>
+          <p className="mt-3 text-slate-400">
+            {audit
+              ? "Your decision has been processed with a tamper-evident SHA-256 hash."
+              : "Each completed step becomes part of the hashed audit record."}
+          </p>
+
+          {/* Steps progress */}
+          <div className="mt-9 space-y-3 text-left">
+            {(steps.length ? steps : [{ title: "Preparing verified reasoning", detail: "Connecting to the decision engine." }]).map((step, index) => (
+              <div
+                key={step.title}
+                className={`rounded-xl px-4 py-3 ${index <= active || audit ? "bg-blue-500/10 text-white" : "text-slate-600"}`}
+              >
+                <div className="flex items-center gap-3 text-sm">
+                  {index < active || audit ? (
+                    <CheckCircle2 size={18} className="text-emerald-300" />
+                  ) : (
+                    <Activity size={18} className="animate-pulse" />
+                  )}
+                  {step.title}
+                </div>
+                <p className="ml-7 mt-1 text-xs text-slate-400">{step.detail}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* After processing complete */}
+          {audit && (
+            <div className="mt-7 rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-4 text-left">
+              <div className="flex gap-3">
+                <ShieldCheck className="shrink-0 text-cyan-300" size={19} />
+                <div>
+                  <p className="font-medium">SHA-256 receipt ready</p>
+                  <code className="mt-2 block break-all text-xs text-cyan-200">{audit.hash}</code>
+                </div>
+              </div>
+
+              {/* Blockchain commit option */}
+              {isBlockchainConfigured() ? (
+                <Button className="mt-4 w-full" onClick={commit} disabled={committing}>
+                  {committing ? "Waiting for wallet confirmation…" : "Commit decision on-chain"}
+                </Button>
+              ) : null}
+
+              {/* Always show: View decision button */}
+              <button
+                className={isBlockchainConfigured() ? "secondary-btn mt-3 w-full" : "btn-primary mt-4 w-full"}
+                onClick={() => navigate(`/decision/${id}`, { replace: true })}
+              >
+                {isBlockchainConfigured() ? "Skip & view decision" : "View decision"} <ArrowRight size={17} />
+              </button>
+
+              {!isBlockchainConfigured() && (
+                <p className="mt-3 text-xs text-slate-500">
+                  Auto-redirecting to decision page...
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Commit error that still has a way out */}
+          {audit?.commitFailed && (
+            <p className="mt-3 text-sm text-amber-300">
+              Blockchain commit failed, but your decision is saved locally. Click "View decision" to see it.
+            </p>
+          )}
+
+          {error && !audit?.commitFailed && (
+            <p className="mt-4 text-sm text-rose-400">{error}</p>
+          )}
+        </GlassCard>
+      </section>
+    </Page>
+  );
 }
