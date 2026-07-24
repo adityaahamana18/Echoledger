@@ -13,10 +13,13 @@ function Navbar() {
   const navigate = useNavigate();
   const nav = [
     { to: "/", label: "Home" },
-    { to: "/loan", label: "New decision", requiresAuth: true },
+    { to: "/apply", label: "New decision", requiresAuth: true },
     { to: "/trace", label: "Audit trail" },
     { to: "/verify", label: "Verify" },
     { to: "/admin", label: "Insights" },
+    { to: "/governance", label: "Governance", requiresAuth: true },
+    { to: "/pricing", label: "Pricing" },
+    { to: "/contact", label: "Contact" },
   ];
 
   useEffect(() => onAuthStateChanged(auth, setUser), []);

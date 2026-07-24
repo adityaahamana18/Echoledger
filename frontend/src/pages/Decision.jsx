@@ -23,7 +23,7 @@ export default function Decision() {
   if (!audit) return <Page><p className="mx-auto max-w-5xl px-6 py-20 text-slate-400">Loading decision record…</p></Page>;
 
   const { result, application } = audit;
-  const approved = result.decision?.toLowerCase().includes("approv");
+  const approved = result.decision?.toLowerCase().includes("approv") || result.decision?.toLowerCase().includes("eligible") || result.decision?.toLowerCase().includes("shortlist") || result.decision?.toLowerCase().includes("admit") || result.decision?.toLowerCase().includes("standard");
 
   const exportPdf = () => {
     const pdf = new jsPDF("p", "mm", "a4");
@@ -96,6 +96,17 @@ export default function Decision() {
       });
     };
 
+    const sectionTitle = (title) => {
+      checkSpace(20);
+      pdf.setFillColor(30, 41, 59);
+      pdf.roundedRect(margin, y - 5, maxWidth, 10, 2, 2, "F");
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(125, 211, 252);
+      pdf.setFontSize(11);
+      pdf.text(title.toUpperCase(), margin + 4, y + 1.5);
+      y += 12;
+    };
+
     // === FIRST PAGE ===
     // Fill dark background
     pdf.setFillColor(2, 6, 23);
@@ -120,13 +131,10 @@ export default function Decision() {
     pdf.line(margin, y, 192, y);
     y += 10;
 
-    // Applicant details
-    write("Applicant", application.name);
-    write("Email", application.email);
-    write("Phone", application.phone);
-    write("Date of birth", application.dob);
-    write("Loan request", `₹${Number(application.loanAmount).toLocaleString("en-IN")}`);
-    write("Credit score", application.creditScore);
+    // Applicant details (industry-aware)
+    const fields = (INDUSTRY_FIELDS[application.industry] || INDUSTRY_FIELDS.banking)(application);
+    fields.forEach(({ label, value }) => { if (value) write(label, value); });
+    write("Industry", application.industryLabel || application.industry || "Banking");
     write("Outcome", result.decision);
     write("Confidence", `${result.confidence}%`);
     write("Risk level", result.risk);
@@ -211,6 +219,20 @@ export default function Decision() {
       y += 3;
     }
 
+    // Multi-Agent Jury
+    if (result.jury) {
+      sectionTitle("Multi-Agent AI Jury");
+      [["Optimist", result.jury.optimist], ["Risk Assessor", result.jury.riskAssessor], ["Judge", result.jury.judge]].forEach(([role, arg]) => {
+        if (!arg) return;
+        checkSpace(15);
+        pdf.setFont("helvetica", "bold"); pdf.setTextColor(226, 232, 240); pdf.setFontSize(10);
+        pdf.text(`${role}: ${arg.position || arg.decision || "Deliberation"}`, margin, y); y += 5;
+        writeParagraph(arg.rationale || arg.reason || "No rationale recorded.", 9, 4);
+      });
+      if (result.jury.judge?.biasCheck) writeParagraph(`Bias check: ${result.jury.judge.biasCheck}`, 9, 0, "#67e8f9");
+      y += 3;
+    }
+
     // Section: Tamper-evident hash
     checkSpace(25);
     pdf.setFont("helvetica", "bold");
@@ -256,14 +278,7 @@ export default function Decision() {
               <RiskMeter risk={result.risk} />
             </div>
             <div className="mt-8 grid gap-4 border-t border-white/10 pt-6 sm:grid-cols-2">
-              <Detail label="Applicant" value={application.name} />
-              <Detail label="Email" value={application.email} />
-              <Detail label="Phone" value={application.phone} />
-              <Detail label="Date of birth" value={application.dob} />
-              <Detail label="Requested amount" value={`₹${Number(application.loanAmount).toLocaleString("en-IN")}`} />
-              <Detail label="Employment" value={application.employment} />
-              <Detail label="Credit score" value={application.creditScore} />
-              <Detail label="Age" value={application.age ? `${application.age} years` : "—"} />
+              <IndustryDetails application={application} />
             </div>
           </GlassCard>
 
@@ -285,7 +300,9 @@ export default function Decision() {
           <code className="mt-3 block break-all rounded-lg bg-black/20 p-3 text-xs text-cyan-300">sha256:{audit.hash}</code>
         </GlassCard>
 
-        <DecisionInsights application={application} result={result} hash={audit.hash} />
+        <div className="mt-6">
+          <DecisionInsights application={application} result={result} hash={audit.hash} />
+        </div>
         <div className="mt-6"><OnChainVerification decisionId={id} expectedHash={audit.hash} /></div>
         <div className="mt-8 flex flex-wrap gap-3">
           <Link to={`/trace/${id}`}><Button>View audit trail</Button></Link>
@@ -303,4 +320,19 @@ function Detail({ label, value }) {
       <p className="mt-1 font-medium">{value || "—"}</p>
     </div>
   );
+}
+
+const INDUSTRY_FIELDS = {
+  banking:          (a) => [{ label: "Applicant", value: a.name }, { label: "Email", value: a.email }, { label: "Phone", value: a.phone }, { label: "Date of birth", value: a.dob }, { label: "Requested amount", value: `₹${Number(a.loanAmount || 0).toLocaleString("en-IN")}` }, { label: "Employment", value: a.employment }, { label: "Credit score", value: a.creditScore }, { label: "Age", value: a.age ? `${a.age} years` : null }],
+  insurance:        (a) => [{ label: "Applicant", value: a.name }, { label: "Email", value: a.email }, { label: "Policy type", value: a.policyType }, { label: "Coverage amount", value: `₹${Number(a.coverageAmount || 0).toLocaleString("en-IN")}` }, { label: "Smoking status", value: a.smokingStatus }, { label: "Occupation", value: a.occupation }, { label: "Pre-existing conditions", value: a.preExistingConditions }, { label: "Age", value: a.age ? `${a.age} years` : null }],
+  hiring:           (a) => [{ label: "Candidate", value: a.name }, { label: "Email", value: a.email }, { label: "Role applied for", value: a.role }, { label: "Experience", value: `${a.yearsExperience} years` }, { label: "Education", value: a.education }, { label: "Skills", value: a.skills }, { label: "Current CTC", value: a.currentCTC ? `₹${Number(a.currentCTC).toLocaleString("en-IN")}` : null }, { label: "Expected CTC", value: a.expectedCTC ? `₹${Number(a.expectedCTC).toLocaleString("en-IN")}` : null }],
+  healthcare:       (a) => [{ label: "Patient", value: a.name }, { label: "Email", value: a.email }, { label: "Phone", value: a.phone }, { label: "Date of birth", value: a.dob }, { label: "Condition", value: a.condition }, { label: "Requested treatment", value: a.requestedTreatment }, { label: "Insurance coverage", value: a.insuranceCoverage }, { label: "Urgency", value: a.urgency }],
+  government:       (a) => [{ label: "Applicant", value: a.name }, { label: "Email", value: a.email }, { label: "Phone", value: a.phone }, { label: "Annual income", value: `₹${Number(a.annualIncome || 0).toLocaleString("en-IN")}` }, { label: "Household size", value: a.householdSize }, { label: "Benefit type", value: a.benefitType }, { label: "Employment status", value: a.employmentStatus }, { label: "State", value: a.state }],
+  education:        (a) => [{ label: "Applicant", value: a.name }, { label: "Email", value: a.email }, { label: "Program", value: a.program }, { label: "Institution", value: a.institution }, { label: "GPA", value: `${a.gpa} / 10` }, { label: "Entrance score", value: `${a.entranceScore} percentile` }, { label: "Financial need", value: a.financialNeed }, { label: "Age", value: a.age ? `${a.age} years` : null }],
+  "customer-support": (a) => [{ label: "Customer", value: a.name }, { label: "Email", value: a.email }, { label: "Phone", value: a.phone }, { label: "Product", value: a.productName }, { label: "Issue type", value: a.issueType }, { label: "Severity", value: a.severity }, { label: "Previous tickets", value: a.previousTickets }, { label: "Resolution requested", value: a.resolutionRequested }],
+};
+
+function IndustryDetails({ application }) {
+  const fields = (INDUSTRY_FIELDS[application.industry] || INDUSTRY_FIELDS.banking)(application);
+  return fields.map(({ label, value }) => <Detail key={label} label={label} value={value} />);
 }

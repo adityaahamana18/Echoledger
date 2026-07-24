@@ -3,6 +3,7 @@ import { FileCheck2, ShieldCheck } from "lucide-react";
 import Page from "../components/Page";
 import GlassCard from "../components/GlassCard";
 import Timeline from "../components/Timeline";
+import DecisionReplay from "../components/DecisionReplay";
 import Button from "../components/Button";
 import { getAudit, getAudits } from "../utils/audit";
 import { useEffect, useState } from "react";
@@ -92,6 +93,10 @@ export default function Trace() {
             <code className="mt-2 block break-all text-xs text-cyan-300">{audit.hash}</code>
           </div>
         </GlassCard>
+
+        <div className="mt-8">
+          <DecisionReplay audit={audit} />
+        </div>
 
         <div className="mt-7 flex gap-3">
           <Link to={`/decision/${id}`}><Button>Back to decision</Button></Link>
