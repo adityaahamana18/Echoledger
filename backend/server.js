@@ -14,14 +14,46 @@ app.use(cors());
 app.use(express.json());
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
-const disputeAbi = [{ type: "function", name: "automatedChallenge", stateMutability: "nonpayable", inputs: [{ type: "bytes32", name: "decisionId" }, { type: "string", name: "reason" }], outputs: [] }];
+const disputeAbi = [
+  { type: "function", name: "automatedChallenge", stateMutability: "nonpayable", inputs: [{ type: "bytes32", name: "decisionId" }, { type: "string", name: "reason" }], outputs: [] },
+  { type: "function", name: "commitDecision", stateMutability: "nonpayable", inputs: [{ type: "bytes32", name: "decisionId" }, { type: "bytes32", name: "decisionHash" }], outputs: [] },
+  { type: "function", name: "verifyDecision", stateMutability: "view", inputs: [{ type: "bytes32", name: "decisionId" }], outputs: [{ type: "bytes32", name: "hash" }, { type: "uint64", name: "committedAt" }, { type: "address", name: "committedBy" }] },
+];
+const registryAbi = [
+  { type: "function", name: "anchor", stateMutability: "nonpayable", inputs: [{ type: "bytes32", name: "decisionHash" }], outputs: [] },
+  { type: "function", name: "verify", stateMutability: "view", inputs: [{ type: "bytes32", name: "decisionHash" }], outputs: [{ type: "bool", name: "anchored" }, { type: "uint64", name: "anchoredAt" }, { type: "address", name: "anchoredBy" }] },
+];
 const automationReady = () => process.env.BLOCKCHAIN_RPC_URL && process.env.SIMPLE_DISPUTE_ADDRESS && process.env.AUTOMATION_PRIVATE_KEY;
+const registryReady = () => process.env.BLOCKCHAIN_RPC_URL && process.env.REGISTRY_ADDRESS;
+const getWalletClient = () => {
+  const account = privateKeyToAccount(process.env.AUTOMATION_PRIVATE_KEY);
+  return createWalletClient({ account, transport: http(process.env.BLOCKCHAIN_RPC_URL) });
+};
+const getPublicClient = () => createPublicClient({ transport: http(process.env.BLOCKCHAIN_RPC_URL) });
+
 const automatedChallenge = async (id, hash, reason) => {
   if (!automationReady()) return null;
-  const account = privateKeyToAccount(process.env.AUTOMATION_PRIVATE_KEY);
-  const client = createWalletClient({ account, transport: http(process.env.BLOCKCHAIN_RPC_URL) });
-  const tx = await client.writeContract({ address: process.env.SIMPLE_DISPUTE_ADDRESS, abi: disputeAbi, functionName: "automatedChallenge", args: [keccak256(stringToHex(id)), reason] });
-  await createPublicClient({ transport: http(process.env.BLOCKCHAIN_RPC_URL) }).waitForTransactionReceipt({ hash: tx });
+  const wallet = getWalletClient();
+  const tx = await wallet.writeContract({ address: process.env.SIMPLE_DISPUTE_ADDRESS, abi: disputeAbi, functionName: "automatedChallenge", args: [keccak256(stringToHex(id)), reason] });
+  await getPublicClient().waitForTransactionReceipt({ hash: tx });
+  return tx;
+};
+
+const anchorHashOnChain = async (decisionHash) => {
+  if (!registryReady()) return null;
+  const wallet = getWalletClient();
+  const hashBytes = `0x${decisionHash.replace(/^sha256:/, "").replace(/^0x/, "")}`;
+  const tx = await wallet.writeContract({ address: process.env.REGISTRY_ADDRESS, abi: registryAbi, functionName: "anchor", args: [hashBytes] });
+  await getPublicClient().waitForTransactionReceipt({ hash: tx });
+  return tx;
+};
+
+const commitDecisionOnChain = async (id, decisionHash) => {
+  if (!automationReady()) return null;
+  const wallet = getWalletClient();
+  const hashBytes = `0x${decisionHash.replace(/^sha256:/, "").replace(/^0x/, "")}`;
+  const tx = await wallet.writeContract({ address: process.env.SIMPLE_DISPUTE_ADDRESS, abi: disputeAbi, functionName: "commitDecision", args: [keccak256(stringToHex(id)), hashBytes] });
+  await getPublicClient().waitForTransactionReceipt({ hash: tx });
   return tx;
 };
 let adminAuth = null;
@@ -267,6 +299,46 @@ app.post("/automated-challenge", requireAuth, async (req, res) => {
   const transactionHash = await automatedChallenge(id, hash, reason || audit.data().result.agentReview.reason);
   await reference.update({ agentChallenge: { status: "Submitted on-chain", reason: reason || audit.data().result.agentReview.reason, transactionHash, submittedAt: new Date().toISOString() } });
   res.json({ transactionHash });
+});
+
+// ── Blockchain endpoints ───────────────────────────────────────────────────────
+
+// POST /anchor-onchain — Anchor a decision hash to DecisionHashRegistry
+app.post("/anchor-onchain", requireAuth, async (req, res) => {
+  const { id, hash } = req.body;
+  if (!id || !hash) return res.status(400).json({ error: "Decision ID and SHA-256 hash are required." });
+  if (!registryReady()) return res.status(409).json({ error: "REGISTRY_ADDRESS is not configured." });
+  try {
+    const transactionHash = await anchorHashOnChain(hash);
+    if (adminDb) {
+      await adminDb.doc(`users/${req.user.uid}/applications/${id}`).update({
+        onChainAnchor: { transactionHash, hash, anchoredAt: new Date().toISOString() }
+      });
+    }
+    res.json({ transactionHash });
+  } catch (err) {
+    console.error("On-chain anchoring failed", err.message);
+    res.status(500).json({ error: err.shortMessage || err.message || "Blockchain anchoring failed." });
+  }
+});
+
+// POST /commit-onchain — Commit a decision to SimpleDispute
+app.post("/commit-onchain", requireAuth, async (req, res) => {
+  const { id, hash } = req.body;
+  if (!id || !hash) return res.status(400).json({ error: "Decision ID and SHA-256 hash are required." });
+  if (!automationReady()) return res.status(409).json({ error: "SimpleDispute is not configured." });
+  try {
+    const transactionHash = await commitDecisionOnChain(id, hash);
+    if (adminDb) {
+      await adminDb.doc(`users/${req.user.uid}/applications/${id}`).update({
+        onChainCommit: { transactionHash, hash, committedAt: new Date().toISOString() }
+      });
+    }
+    res.json({ transactionHash });
+  } catch (err) {
+    console.error("On-chain commit failed", err.message);
+    res.status(500).json({ error: err.shortMessage || err.message || "Blockchain commit failed." });
+  }
 });
 
 const port = process.env.PORT || 5000;

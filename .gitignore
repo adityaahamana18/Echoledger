@@ -4,3 +4,14 @@ build/
 .cache/
 *.log
 .DS_Store
+
+# Environment files (sensitive data)
+.env
+.env.local
+.env.*.local
+
+# Blockchain artifacts
+blockchain/artifacts/
+blockchain/cache/
+blockchain/types/
+blockchain/ignition/deployments/

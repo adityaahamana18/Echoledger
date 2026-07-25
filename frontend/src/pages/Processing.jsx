@@ -6,7 +6,7 @@ import GlassCard from "../components/GlassCard";
 import Button from "../components/Button";
 import api from "../api/api";
 import { auth } from "../firebase";
-import { commitDecision, isBlockchainConfigured } from "../blockchain/simpleDispute";
+import { anchorDecisionHash, commitDecision, isBlockchainConfigured, isRegistryConfigured } from "../blockchain/simpleDispute";
 import { getAudit, saveBlockchainCommit, saveDecision } from "../utils/audit";
 
 const INDUSTRY_FALLBACKS = {
@@ -60,6 +60,8 @@ export default function Processing() {
   const [audit, setAudit] = useState(null);
   const [jury, setJury] = useState([]);
   const [committing, setCommitting] = useState(false);
+  const [anchoring, setAnchoring] = useState(false);
+  const [anchorTx, setAnchorTx] = useState(null);
   const navigate = useNavigate();
   const { id } = useParams();
 
@@ -117,6 +119,7 @@ export default function Processing() {
   const commit = async () => {
     setCommitting(true);
     setError("");
+    setAudit((prev) => prev ? { ...prev, commitFailed: false } : prev);
     try {
       const receipt = await commitDecision(id, audit.hash);
       await saveBlockchainCommit(id, receipt.transactionHash);
@@ -192,9 +195,41 @@ export default function Processing() {
                 </div>
               </div>
 
-              {/* Blockchain commit option */}
+              {/* Anchor hash on-chain via DecisionHashRegistry */}
+              {isRegistryConfigured() && !anchorTx && (
+                <button
+                  className="secondary-btn mt-3 w-full"
+                  onClick={async () => {
+                    setAnchoring(true);
+                    setError("");
+                    try {
+                      const receipt = await anchorDecisionHash(audit.hash);
+                      setAnchorTx(receipt.transactionHash);
+                      // Also notify the backend
+                      try {
+                        const token = await auth.currentUser?.getIdToken();
+                        await api.post("/anchor-onchain", { id, hash: audit.hash }, { headers: { Authorization: `Bearer ${token}` } });
+                      } catch (backendErr) {
+                        console.warn("Backend anchor notification failed (hash still on-chain)", backendErr);
+                      }
+                    } catch (err) {
+                      setError(err.shortMessage || err.message || "Blockchain anchoring failed.");
+                    } finally {
+                      setAnchoring(false);
+                    }
+                  }}
+                  disabled={anchoring}
+                >
+                  {anchoring ? "Anchoring to blockchain…" : "Anchor hash on-chain (DecisionHashRegistry)"}
+                </button>
+              )}
+              {anchorTx && (
+                <p className="mt-2 text-xs text-emerald-300">✓ Hash anchored on-chain: {anchorTx.slice(0, 10)}…{anchorTx.slice(-6)}</p>
+              )}
+
+              {/* Blockchain commit option (SimpleDispute) */}
               {isBlockchainConfigured() ? (
-                <Button className="mt-4 w-full" onClick={commit} disabled={committing}>
+                <Button className="mt-3 w-full" onClick={commit} disabled={committing}>
                   {committing ? "Waiting for wallet confirmation…" : "Commit decision on-chain"}
                 </Button>
               ) : null}
@@ -215,11 +250,23 @@ export default function Processing() {
             </div>
           )}
 
-          {/* Commit error that still has a way out */}
+          {/* Commit failed: show retry + view decision */}
           {audit?.commitFailed && (
-            <p className="mt-3 text-sm text-amber-300">
-              Blockchain commit failed, but your decision is saved locally. Click "View decision" to see it.
-            </p>
+            <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 text-left">
+              <p className="text-sm text-amber-300 font-medium">Blockchain commit failed</p>
+              <p className="mt-1 text-xs text-amber-200/70">{error || "Transaction was rejected or the network is unavailable."} Your decision is saved locally.</p>
+              <div className="mt-3 flex gap-2">
+                <Button className="flex-1" onClick={commit} disabled={committing}>
+                  {committing ? "Retrying…" : "Retry commit"}
+                </Button>
+                <button
+                  className="secondary-btn flex-1"
+                  onClick={() => navigate(`/decision/${id}`, { replace: true })}
+                >
+                  View decision <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
           )}
 
           {error && !audit?.commitFailed && (

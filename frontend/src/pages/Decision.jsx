@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Download, FileSearch, ShieldCheck, ThumbsDown } from "lucide-react";
+import { Download, FileSearch, ShieldCheck, ThumbsDown, Anchor, BadgeCheck } from "lucide-react";
+import { isBlockchainConfigured, isRegistryConfigured } from "../blockchain/simpleDispute";
 import { jsPDF } from "jspdf";
 import Page from "../components/Page";
 import GlassCard from "../components/GlassCard";
@@ -298,6 +299,35 @@ export default function Decision() {
         <GlassCard className="mt-6">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tamper-evident decision hash</p>
           <code className="mt-3 block break-all rounded-lg bg-black/20 p-3 text-xs text-cyan-300">sha256:{audit.hash}</code>
+
+          {/* Blockchain status indicators */}
+          <div className="mt-4 flex flex-wrap gap-3">
+            {audit.onChainAnchor && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
+                <Anchor size={12} /> Anchored on-chain
+              </span>
+            )}
+            {audit.onChainCommit && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
+                <BadgeCheck size={12} /> Committed on-chain
+              </span>
+            )}
+            {audit.blockchain && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-300">
+                <BadgeCheck size={12} /> Blockchain tx: {audit.blockchain.transactionHash?.slice(0, 10)}…
+              </span>
+            )}
+            {audit.agentChallenge && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-300">
+                <ThumbsDown size={12} /> Automated challenge submitted
+              </span>
+            )}
+            {!audit.onChainAnchor && !audit.onChainCommit && !audit.blockchain && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-500/15 px-3 py-1 text-xs font-medium text-slate-400">
+                Not yet anchored on-chain
+              </span>
+            )}
+          </div>
         </GlassCard>
 
         <div className="mt-6">

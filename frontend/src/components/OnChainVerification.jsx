@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { BadgeCheck, Search, TriangleAlert } from "lucide-react";
+import { BadgeCheck, Search, TriangleAlert, Fingerprint } from "lucide-react";
 import CryptoJS from "crypto-js";
-import { isBlockchainConfigured, verifyDecision } from "../blockchain/simpleDispute";
+import { isBlockchainConfigured, isRegistryConfigured, verifyDecision, verifyHashOnChain } from "../blockchain/simpleDispute";
 import GlassCard from "./GlassCard";
 
 export default function OnChainVerification({ decisionId = "", expectedHash = "" }) {
@@ -9,11 +9,14 @@ export default function OnChainVerification({ decisionId = "", expectedHash = ""
   const [hash, setHash] = useState(expectedHash);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [registryResult, setRegistryResult] = useState(null);
+  const [checkingRegistry, setCheckingRegistry] = useState(false);
 
   const verify = async (event) => {
     event.preventDefault();
     setError("");
     setResult(null);
+    setRegistryResult(null);
 
     const trimmedId = id.trim();
     const trimmedHash = hash.trim();
@@ -33,7 +36,20 @@ export default function OnChainVerification({ decisionId = "", expectedHash = ""
       return;
     }
 
-    // Try blockchain verification if configured
+    // Check DecisionHashRegistry (immutable anchor)
+    if (isRegistryConfigured()) {
+      setCheckingRegistry(true);
+      try {
+        const reg = await verifyHashOnChain(normalizedHash);
+        setRegistryResult(reg);
+      } catch (regError) {
+        console.warn("Registry check failed", regError);
+      } finally {
+        setCheckingRegistry(false);
+      }
+    }
+
+    // Try SimpleDispute verification if configured
     if (isBlockchainConfigured()) {
       try {
         const chain = await verifyDecision(trimmedId);
@@ -53,7 +69,6 @@ export default function OnChainVerification({ decisionId = "", expectedHash = ""
     }
 
     // Local verification: compare the entered hash with expected hash
-    // If the component was given an expectedHash, check if they match
     if (expectedHash) {
       const expectedNormalized = expectedHash.replace(/^sha256:/i, "").toLowerCase();
       const matches = normalizedHash === expectedNormalized;
@@ -128,6 +143,23 @@ export default function OnChainVerification({ decisionId = "", expectedHash = ""
         <div className="mt-4 rounded-lg bg-rose-500/10 p-3 text-sm text-rose-200">
           <TriangleAlert className="inline mr-2" size={17} />
           {error}
+        </div>
+      )}
+
+      {/* Registry result (DecisionHashRegistry) */}
+      {checkingRegistry && (
+        <div className="mt-4 rounded-lg bg-blue-500/10 p-3 text-sm text-blue-200">
+          <Fingerprint className="inline mr-2 animate-pulse" size={17} />
+          Checking DecisionHashRegistry...
+        </div>
+      )}
+      {registryResult && (
+        <div className={`mt-4 rounded-lg p-3 text-sm ${registryResult.anchored ? "bg-emerald-500/10 text-emerald-200" : "bg-amber-500/10 text-amber-200"}`}>
+          <Fingerprint className="inline mr-2" size={17} />
+          <span className="font-semibold">DecisionHashRegistry:</span>{' '}
+          {registryResult.anchored
+            ? `✓ Hash anchored at block timestamp ${registryResult.anchoredAt} by ${registryResult.anchoredBy.slice(0, 6)}…${registryResult.anchoredBy.slice(-4)}`
+            : "Hash not found on-chain. It may not have been anchored yet."}
         </div>
       )}
 
