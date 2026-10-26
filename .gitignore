@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+.cache/
+*.log
+.DS_Store
+
+# Environment files (sensitive data)
+.env
+.env.local
+.env.*.local
+
+# Blockchain artifacts
+blockchain/artifacts/
+blockchain/cache/
+blockchain/types/
+blockchain/ignition/deployments/
+# Additional sensitive files
+.env.*.local
+*.pem
+*.key
+secrets/
+
+
+# Additional sensitive files
+.env.*.local
+*.pem
+*.key
+secrets/
