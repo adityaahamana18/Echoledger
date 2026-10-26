@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import multer from "multer";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import { getApps, initializeApp, cert, applicationDefault } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -52,8 +52,9 @@ async function extractResumeText(file) {
   if (!file) return null;
   try {
     if (file.mimetype === "application/pdf") {
-      const data = await pdfParse(file.buffer);
-      return data.text?.trim() || null;
+      const parser = new PDFParse({ data: file.buffer });
+      const result = await parser.getText();
+      return result?.text?.trim() || (typeof result === "string" ? result.trim() : null);
     }
     // DOCX
     const result = await mammoth.extractRawText({ buffer: file.buffer });
